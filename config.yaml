@@ -1,0 +1,37 @@
+# config.yaml — Configuration du pipeline ETL S2
+# ================================================
+# Tous les paramètres modifiables sans toucher au code.
+# Les clés API sensibles vont dans les variables d'environnement (.env).
+
+paths:
+  cosing_raw:     "data/raw/cosing_clean.csv"
+  pubchem_raw:    "data/raw/cosing_pubchem.csv"
+  output_csv:     "data/clean/cosing_pubchem_clean.csv"
+  output_summary: "data/clean/export_summary.json"
+  suppliers_dir:  "data/raw/suppliers/"
+  log_file:       "pipeline.log"
+
+dedup:
+  fuzzy_threshold: 0.95   # Seuil de similarité pour la déduplication fuzzy (0.0-1.0)
+  max_error_rate:  0.10   # Circuit breaker : arrêt si >10% d'erreurs sur une source
+
+# Taux de change fixes au 01/05/2026 (vers EUR)
+# En production : connecter une API de change (ex. Open Exchange Rates)
+exchange_rates:
+  EUR: 1.0
+  USD: 0.922
+  GBP: 1.168
+  CHF: 1.013
+
+# TVA standard par pays (taux décimal)
+vat_rates:
+  FR: 0.20
+  DE: 0.19
+  GB: 0.20
+  US: 0.0
+
+# Sources de données activées
+sources:
+  cosing:    true
+  pubchem:   true
+  suppliers: true

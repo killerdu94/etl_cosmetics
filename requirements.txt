@@ -1,0 +1,11 @@
+# Dépendances S1
+pandas>=2.0.0
+requests>=2.31.0
+numpy>=1.24.0
+
+# Dépendances S2
+chardet>=5.0.0
+pdfplumber>=0.10.0
+openpyxl>=3.1.0
+pyyaml>=6.0
+rapidfuzz>=3.0.0

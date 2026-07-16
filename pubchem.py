@@ -134,6 +134,8 @@ def enrich_with_pubchem(
     cas_col: str = "cas",
     max_ingredients: int | None = None,
     delay: float = 0.3,
+    checkpoint_path: str | None = None,
+    checkpoint_every: int = 200,
 ) -> pd.DataFrame:
     """Enrichit un DataFrame avec les données SMILES de PubChem.
 
@@ -141,16 +143,20 @@ def enrich_with_pubchem(
     - Délai fixe entre requêtes (respecte la limite PubChem ~5 req/s)
     - Retry automatique avec backoff exponentiel sur erreur réseau
     - Fail-safe par ingrédient : une erreur n'arrête pas le pipeline
-    - Skip des lignes sans CAS
+    - Skip des lignes sans CAS et des lignes déjà traitées (colonne pubchem_checked)
+    - Sauvegarde périodique (checkpoint_path) : une interruption ne perd que les
+      ingrédients traités depuis le dernier checkpoint, pas tout le run
 
     Args:
-        df:              DataFrame avec au minimum une colonne CAS.
-        cas_col:         Nom de la colonne CAS (défaut : 'cas').
-        max_ingredients: Nombre max d'ingrédients à traiter (None = tous).
-        delay:           Délai en secondes entre chaque requête (défaut : 0.3).
+        df:               DataFrame avec au minimum une colonne CAS.
+        cas_col:          Nom de la colonne CAS (défaut : 'cas').
+        max_ingredients:  Nombre max d'ingrédients à traiter (None = tous).
+        delay:            Délai en secondes entre chaque requête (défaut : 0.3).
+        checkpoint_path:  Chemin CSV où sauvegarder périodiquement (None = pas de checkpoint).
+        checkpoint_every: Nombre d'ingrédients entre deux sauvegardes (défaut : 200).
 
     Returns:
-        DataFrame enrichi avec colonnes : cid, smiles, inchi, formula, iupac_name.
+        Tuple (DataFrame enrichi, stats de CE run : success/total/errors).
     """
     df = df.copy()
 
@@ -158,13 +164,21 @@ def enrich_with_pubchem(
     for col in ["cid", "smiles", "inchi", "formula", "iupac_name"]:
         if col not in df.columns:
             df[col] = None
+    if "pubchem_checked" not in df.columns:
+        df["pubchem_checked"] = False
+    # Le CSV relu (reprise) stocke ce booléen en texte ("True"/"False") ;
+    # astype(bool) sur une chaîne non vide renvoie toujours True, d'où ce parsing explicite.
+    df["pubchem_checked"] = (
+        df["pubchem_checked"].astype(str).str.strip().str.lower().eq("true")
+    )
 
     if cas_col not in df.columns:
         logger.error("Colonne '%s' absente — enrichissement impossible", cas_col)
-        return df
+        return df, {"success": 0, "total": 0, "errors": 0}
 
-    # Sélectionne les lignes avec CAS valide
+    # Sélectionne les lignes avec CAS valide, pas encore vérifiées (reprise)
     mask = df[cas_col].notna() & (df[cas_col].astype(str).str.strip() != "")
+    mask &= ~df["pubchem_checked"]
     targets = df[mask]
     if max_ingredients:
         targets = targets.head(max_ingredients)
@@ -182,10 +196,13 @@ def enrich_with_pubchem(
         logger.debug("[%d/%d] %s (CAS: %s)", i, total, name, cas)
 
         result = get_pubchem_by_cas(cas)
+        df.at[idx, "pubchem_checked"] = True
 
         if result["smiles"]:
             for col, val in result.items():
-                df.at[idx, col] = val
+                # Cast en str : les colonnes relues via pd.read_csv(dtype=str) (reprise)
+                # utilisent un dtype string strict qui refuse un int (ex. cid) tel quel.
+                df.at[idx, col] = str(val) if val is not None else None
             success += 1
             logger.debug("  ✅ CID=%s  formule=%s", result["cid"], result["formula"])
         else:
@@ -194,12 +211,19 @@ def enrich_with_pubchem(
 
         time.sleep(delay)
 
+        if checkpoint_path and i % checkpoint_every == 0:
+            save_enriched(df, checkpoint_path)
+            logger.info("Checkpoint : %d/%d ingrédients traités depuis la reprise", i, total)
+
+    if checkpoint_path and total:
+        save_enriched(df, checkpoint_path)
+
     coverage = success / total * 100 if total else 0
     logger.info(
         "Enrichissement terminé : %d/%d SMILES (%.1f%%) — %d non trouvés",
         success, total, coverage, errors,
     )
-    return df
+    return df, {"success": success, "total": total, "errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +263,10 @@ if __name__ == "__main__":
     parser.add_argument("--output", default=ENRICHED_PATH, help="CSV enrichi en sortie")
     parser.add_argument("--max",    type=int, default=None, help="Nombre max d'ingrédients à enrichir")
     parser.add_argument("--delay",  type=float, default=0.3, help="Délai entre requêtes (secondes)")
+    parser.add_argument("--checkpoint-every", type=int, default=200,
+                         help="Sauvegarde tous les N ingrédients (défaut : 200)")
+    parser.add_argument("--fresh", action="store_true",
+                         help="Ignore une sortie existante et repart de zéro (par défaut : reprise automatique)")
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
@@ -246,24 +274,28 @@ if __name__ == "__main__":
         print("Lancez d'abord : python cosing.py")
         raise SystemExit(1)
 
-    df = pd.read_csv(args.input, dtype=str)
-    logger.info("COSING chargé : %d ingrédients", len(df))
+    if not args.fresh and os.path.exists(args.output):
+        df = pd.read_csv(args.output, dtype=str)
+        n_done = int(df["pubchem_checked"].fillna("False").astype(str).str.lower().eq("true").sum()) if "pubchem_checked" in df.columns else 0
+        logger.info("Reprise depuis %s : %d ingrédients déjà vérifiés", args.output, n_done)
+    else:
+        df = pd.read_csv(args.input, dtype=str)
+        logger.info("COSING chargé : %d ingrédients", len(df))
 
-    df_enriched = enrich_with_pubchem(df, cas_col="cas", max_ingredients=args.max, delay=args.delay)
+    df_enriched, stats = enrich_with_pubchem(
+        df, cas_col="cas", max_ingredients=args.max, delay=args.delay,
+        checkpoint_path=args.output, checkpoint_every=args.checkpoint_every,
+    )
     save_enriched(df_enriched, args.output)
 
-    # Nombre d'ingrédients réellement ciblés (CAS valide, borné par --max) —
-    # pas la taille totale du fichier, sinon le % de couverture est faussé.
-    mask = df["cas"].notna() & (df["cas"].astype(str).str.strip() != "")
-    n_targeted = int(mask.sum())
-    if args.max:
-        n_targeted = min(n_targeted, args.max)
-
-    smiles_n = int(df_enriched["smiles"].notna().sum())
-    coverage = smiles_n / n_targeted * 100 if n_targeted else 0.0
+    # Stats de CE run uniquement (calculées dans enrich_with_pubchem, qui seul
+    # sait combien d'ingrédients étaient réellement à traiter après reprise).
+    coverage = stats["success"] / stats["total"] * 100 if stats["total"] else 0.0
+    smiles_total = int(df_enriched["smiles"].notna().sum())
     print(f"\n{'='*55}")
     print(f"  Enrichissement PubChem terminé")
-    print(f"  Ingrédients traités : {n_targeted:,}")
-    print(f"  SMILES récupérés    : {smiles_n:,} ({coverage:.1f}%)")
-    print(f"  Fichier             : {args.output}")
+    print(f"  Ingrédients traités (ce run) : {stats['total']:,}")
+    print(f"  SMILES récupérés (ce run)    : {stats['success']:,} ({coverage:.1f}%)")
+    print(f"  SMILES au total (cumulé)     : {smiles_total:,} / {len(df_enriched):,}")
+    print(f"  Fichier                      : {args.output}")
     print(f"{'='*55}")

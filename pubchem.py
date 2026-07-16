@@ -70,6 +70,11 @@ def _get_with_retry(url: str, retries: int = MAX_RETRIES) -> requests.Response |
         except requests.exceptions.ConnectionError:
             logger.warning("Erreur réseau (tentative %d/%d)", attempt, retries)
             time.sleep(2 ** attempt)
+        except requests.exceptions.RequestException as exc:
+            # Fail-safe générique (ex. ChunkedEncodingError : réponse tronquée en
+            # cours de streaming) : ne doit jamais remonter et stopper le pipeline.
+            logger.warning("Erreur requête (tentative %d/%d) : %s", attempt, retries, exc)
+            time.sleep(2 ** attempt)
     return None
 
 

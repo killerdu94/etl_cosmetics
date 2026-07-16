@@ -110,14 +110,14 @@ def get_pubchem_by_cas(cas: str) -> dict:
     result["cid"] = cid
 
     # Étape 2 : CID → propriétés
-    props = "IsomericSMILES,InChI,MolecularFormula,IUPACName"
+    props = "SMILES,InChI,MolecularFormula,IUPACName"
     url_props = f"{BASE_URL}/compound/cid/{cid}/property/{props}/JSON"
     r2 = _get_with_retry(url_props)
     if r2 is None:
         return result
 
     props_data = r2.json().get("PropertyTable", {}).get("Properties", [{}])[0]
-    result["smiles"]     = props_data.get("IsomericSMILES")
+    result["smiles"]     = props_data.get("SMILES")
     result["inchi"]      = props_data.get("InChI")
     result["formula"]    = props_data.get("MolecularFormula")
     result["iupac_name"] = props_data.get("IUPACName")
@@ -252,10 +252,18 @@ if __name__ == "__main__":
     df_enriched = enrich_with_pubchem(df, cas_col="cas", max_ingredients=args.max, delay=args.delay)
     save_enriched(df_enriched, args.output)
 
+    # Nombre d'ingrédients réellement ciblés (CAS valide, borné par --max) —
+    # pas la taille totale du fichier, sinon le % de couverture est faussé.
+    mask = df["cas"].notna() & (df["cas"].astype(str).str.strip() != "")
+    n_targeted = int(mask.sum())
+    if args.max:
+        n_targeted = min(n_targeted, args.max)
+
     smiles_n = int(df_enriched["smiles"].notna().sum())
+    coverage = smiles_n / n_targeted * 100 if n_targeted else 0.0
     print(f"\n{'='*55}")
     print(f"  Enrichissement PubChem terminé")
-    print(f"  Ingrédients traités : {len(df_enriched):,}")
-    print(f"  SMILES récupérés    : {smiles_n:,} ({smiles_n/len(df_enriched)*100:.1f}%)")
+    print(f"  Ingrédients traités : {n_targeted:,}")
+    print(f"  SMILES récupérés    : {smiles_n:,} ({coverage:.1f}%)")
     print(f"  Fichier             : {args.output}")
     print(f"{'='*55}")

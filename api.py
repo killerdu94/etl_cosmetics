@@ -33,7 +33,7 @@ _df_cache: Optional[pd.DataFrame] = None
 
 
 def _get_df() -> pd.DataFrame:
-    """Charge les ingrédients une seule fois (SQLite -> CSV -> démo), mis en cache."""
+    """Charge les ingrédients une seule fois (PostgreSQL -> CSV -> démo), mis en cache."""
     global _df_cache
     if _df_cache is None:
         _df_cache = search_app.load_data()
@@ -47,21 +47,23 @@ def health() -> dict:
 
 @app.get("/api/filters")
 def get_filters() -> dict:
-    """Valeurs disponibles pour les menus déroulants (catégorie, type de matière)."""
+    """Valeurs disponibles pour les menus déroulants (catégorie, type de matière, fonction)."""
     df = _get_df()
     cats = sorted(df["functional_category"].dropna().unique().tolist()) if "functional_category" in df.columns else []
     mats = sorted(df["matter_type"].dropna().unique().tolist()) if "matter_type" in df.columns else []
     names = sorted(df["inci_name"].dropna().unique().tolist()) if "inci_name" in df.columns else []
-    return {"categories": cats, "matters": mats, "inci_names": names}
+    funcs = search_app.list_functions(df)
+    return {"categories": cats, "matters": mats, "functions": funcs, "inci_names": names}
 
 
 @app.get("/api/ingredients")
-def get_ingredients(query: str = "", category: str = "", matter: str = "") -> dict:
-    """Recherche/filtre les ingrédients par nom INCI, catégorie fonctionnelle, type de matière."""
+def get_ingredients(query: str = "", category: str = "", matter: str = "", function: str = "") -> dict:
+    """Recherche/filtre les ingrédients par nom INCI, catégorie fonctionnelle, type de matière, fonction."""
     df = _get_df()
     cats = [category] if category else None
     mats = [matter] if matter else None
-    result = search_app.filter_ingredients(df, query, cats, mats)
+    funcs = [function] if function else None
+    result = search_app.filter_ingredients(df, query, cats, mats, funcs)
     return {
         "total": int(len(df)),
         "count": int(len(result)),
@@ -97,13 +99,17 @@ def _self_test() -> None:
     r = client.get("/api/filters")
     assert r.status_code == 200
     filters = r.json()
-    assert "categories" in filters and "inci_names" in filters
+    assert "categories" in filters and "inci_names" in filters and "functions" in filters
 
     r = client.get("/api/ingredients", params={"query": "GLY"})
     assert r.status_code == 200
     data = r.json()
     assert data["count"] <= data["total"]
     assert all("GLY" in item["inci_name"].upper() for item in data["items"])
+
+    if filters["functions"]:
+        r = client.get("/api/ingredients", params={"function": filters["functions"][0]})
+        assert r.status_code == 200
 
     if filters["inci_names"]:
         ref = filters["inci_names"][0]

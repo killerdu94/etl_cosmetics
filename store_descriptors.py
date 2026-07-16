@@ -1,7 +1,7 @@
 """
-src/store_descriptors.py — Calcul, stockage en base et couverture des descripteurs (S5).
+store_descriptors.py — Calcul, stockage en base et couverture des descripteurs (S5).
 
-S'appuie sur descriptors.py (RDKit) et database.py (schéma SQLite) :
+S'appuie sur descriptors.py (RDKit) et database.py (schéma PostgreSQL) :
     1. calcule MW / logP / TPSA / HBD / HBA pour chaque ingrédient (via son SMILES)
     2. stocke le résultat dans la table `molecular_descriptors` (relation 1-1)
     3. produit un rapport de couverture : combien d'ingrédients ont des descripteurs
@@ -11,23 +11,24 @@ S'appuie sur descriptors.py (RDKit) et database.py (schéma SQLite) :
 from __future__ import annotations
 
 import logging
-import sqlite3
 
 import pandas as pd
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 from descriptors import compute_descriptors
 
 logger = logging.getLogger(__name__)
 
 
-def store_descriptors(conn: sqlite3.Connection) -> int:
+def store_descriptors(conn: Connection) -> int:
     """
     Calcule et insère les descripteurs pour tous les ingrédients ayant un SMILES.
 
     Renvoie le nombre de lignes insérées dans `molecular_descriptors`.
     """
     rows = conn.execute(
-        "SELECT ingredient_id, smiles FROM ingredients WHERE smiles IS NOT NULL"
+        text("SELECT ingredient_id, smiles FROM ingredients WHERE smiles IS NOT NULL")
     ).fetchall()
 
     inserted = 0
@@ -36,9 +37,13 @@ def store_descriptors(conn: sqlite3.Connection) -> int:
         if d["mol_weight"] is None:  # SMILES invalide -> on n'insère pas
             continue
         conn.execute(
-            "INSERT OR REPLACE INTO molecular_descriptors "
-            "(ingredient_id, mol_weight, logp, tpsa) VALUES (?, ?, ?, ?)",
-            (ingredient_id, d["mol_weight"], d["logp"], d["tpsa"]),
+            text(
+                "INSERT INTO molecular_descriptors (ingredient_id, mol_weight, logp, tpsa) "
+                "VALUES (:ing_id, :mw, :logp, :tpsa) "
+                "ON CONFLICT (ingredient_id) DO UPDATE SET "
+                "mol_weight = EXCLUDED.mol_weight, logp = EXCLUDED.logp, tpsa = EXCLUDED.tpsa"
+            ),
+            {"ing_id": ingredient_id, "mw": d["mol_weight"], "logp": d["logp"], "tpsa": d["tpsa"]},
         )
         inserted += 1
     conn.commit()
@@ -46,15 +51,15 @@ def store_descriptors(conn: sqlite3.Connection) -> int:
     return inserted
 
 
-def coverage_report(conn: sqlite3.Connection) -> dict:
+def coverage_report(conn: Connection) -> dict:
     """Rapport de couverture des descripteurs sur l'ensemble des ingrédients."""
-    total = conn.execute("SELECT COUNT(*) FROM ingredients").fetchone()[0]
+    total = conn.execute(text("SELECT COUNT(*) FROM ingredients")).scalar()
     with_smiles = conn.execute(
-        "SELECT COUNT(*) FROM ingredients WHERE smiles IS NOT NULL AND smiles != ''"
-    ).fetchone()[0]
+        text("SELECT COUNT(*) FROM ingredients WHERE smiles IS NOT NULL AND smiles != ''")
+    ).scalar()
     with_desc = conn.execute(
-        "SELECT COUNT(*) FROM molecular_descriptors"
-    ).fetchone()[0]
+        text("SELECT COUNT(*) FROM molecular_descriptors")
+    ).scalar()
 
     report = {
         "ingredients_total": int(total),
@@ -68,7 +73,9 @@ def coverage_report(conn: sqlite3.Connection) -> dict:
 
 
 def _self_test() -> None:
-    from database import SCHEMA_SQL, load_ingredients
+    import os
+
+    from database import create_database, get_database_url, load_ingredients, reset_tables
     from descriptors import _RDKIT_OK
 
     # Données de démo intégrées : aucune dépendance à pubchem.py.
@@ -79,9 +86,9 @@ def _self_test() -> None:
             "smiles": ["O", "C(C(CO)O)O", "C1=CC(=CN=C1)C(=O)N"],
         }
     )
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.executescript(SCHEMA_SQL)
+    test_db_url = get_database_url(os.environ.get("PGDATABASE_TEST", "cosmetics_test"))
+    conn = create_database(test_db_url)
+    reset_tables(conn)
     load_ingredients(conn, df)
 
     n = store_descriptors(conn)

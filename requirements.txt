@@ -5,11 +5,13 @@ httpx2
 idna==3.18
 numpy==2.4.6
 pandas==3.0.3
+psycopg2-binary
 python-dateutil==2.9.0.post0
 rdkit
 reportlab
 requests==2.34.2
 six==1.17.0
+sqlalchemy>=2.0.36
 streamlit
 tzdata==2026.2
 urllib3==2.7.0

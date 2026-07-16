@@ -18,8 +18,8 @@ export function getFilters() {
   return getJSON("/api/filters");
 }
 
-export function searchIngredients({ query, category, matter }) {
-  return getJSON("/api/ingredients", { query, category, matter });
+export function searchIngredients({ query, category, matter, function: fn }) {
+  return getJSON("/api/ingredients", { query, category, matter, function: fn });
 }
 
 export function getSimilarity({ inciName, topN }) {

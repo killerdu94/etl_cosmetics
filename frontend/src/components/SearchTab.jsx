@@ -4,9 +4,11 @@ import { getFilters, searchIngredients } from "../api.js";
 export default function SearchTab() {
   const [categories, setCategories] = useState([]);
   const [matters, setMatters] = useState([]);
+  const [functions, setFunctions] = useState([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [matter, setMatter] = useState("");
+  const [fn, setFn] = useState("");
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState(null);
@@ -16,13 +18,14 @@ export default function SearchTab() {
       .then((data) => {
         setCategories(data.categories);
         setMatters(data.matters);
+        setFunctions(data.functions || []);
       })
       .catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      searchIngredients({ query, category, matter })
+      searchIngredients({ query, category, matter, function: fn })
         .then((data) => {
           setItems(data.items);
           setTotal(data.total);
@@ -31,7 +34,7 @@ export default function SearchTab() {
         .catch((e) => setError(e.message));
     }, 200);
     return () => clearTimeout(timeout);
-  }, [query, category, matter]);
+  }, [query, category, matter, fn]);
 
   return (
     <div className="tab-panel">
@@ -59,6 +62,14 @@ export default function SearchTab() {
             </option>
           ))}
         </select>
+        <select value={fn} onChange={(e) => setFn(e.target.value)}>
+          <option value="">Toutes fonctions</option>
+          {functions.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && <p className="error-msg">{error}</p>}
@@ -75,6 +86,7 @@ export default function SearchTab() {
               <th>CAS</th>
               <th>Catégorie</th>
               <th>Type de matière</th>
+              <th>Fonction</th>
               <th>SMILES</th>
             </tr>
           </thead>
@@ -92,6 +104,9 @@ export default function SearchTab() {
                   {it.matter_type && (
                     <span className="badge badge-purple">{it.matter_type}</span>
                   )}
+                </td>
+                <td>
+                  {it.function && <span className="badge badge-blue">{it.function}</span>}
                 </td>
                 <td className="smiles-cell">{it.smiles ?? "—"}</td>
               </tr>

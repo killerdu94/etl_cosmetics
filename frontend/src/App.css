@@ -171,6 +171,15 @@ th {
   white-space: nowrap;
 }
 
+.scientific-name-cell {
+  font-style: italic;
+  color: var(--text-muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .badge {
   display: inline-block;
   padding: 0.2rem 0.6rem;

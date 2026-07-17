@@ -25,17 +25,23 @@ CSV_PATH = "data/clean/cosing_pubchem_clean.csv"
 def _demo_data() -> pd.DataFrame:
     return pd.DataFrame([
         {"inci_name": "GLYCERIN", "cas_no": "56-81-5", "smiles": "C(C(CO)O)O",
-         "functional_category": "humectant", "matter_type": "polyol", "function": "humectant, solvent"},
+         "functional_category": "humectant", "matter_type": "polyol", "function": "humectant, solvent",
+         "iupac_name": "propane-1,2,3-triol"},
         {"inci_name": "NIACINAMIDE", "cas_no": "98-92-0", "smiles": "C1=CC(=CN=C1)C(=O)N",
-         "functional_category": "antioxydant", "matter_type": "vitamine", "function": "antioxidant, skin conditioning"},
+         "functional_category": "antioxydant", "matter_type": "vitamine", "function": "antioxidant, skin conditioning",
+         "iupac_name": "pyridine-3-carboxamide"},
         {"inci_name": "SALICYLIC ACID", "cas_no": "69-72-7", "smiles": "C1=CC=C(C(=C1)C(=O)O)O",
-         "functional_category": "conservateur", "matter_type": "acide", "function": "preservative, keratolytic"},
+         "functional_category": "conservateur", "matter_type": "acide", "function": "preservative, keratolytic",
+         "iupac_name": "2-hydroxybenzoic acid"},
         {"inci_name": "TOCOPHEROL", "cas_no": "59-02-9", "smiles": "CC1=C(C(=C(C2=C1OC(CC2)(C)CCCC(C)CCCC(C)CCCC(C)C)C)C)O",
-         "functional_category": "antioxydant", "matter_type": "vitamine", "function": "antioxidant"},
+         "functional_category": "antioxydant", "matter_type": "vitamine", "function": "antioxidant",
+         "iupac_name": "2,5,7,8-tetramethyl-2-(4,8,12-trimethyltridecyl)chroman-6-ol"},
         {"inci_name": "PROPYLENE GLYCOL", "cas_no": "57-55-6", "smiles": "CC(CO)O",
-         "functional_category": "humectant", "matter_type": "polyol", "function": "humectant, solvent"},
+         "functional_category": "humectant", "matter_type": "polyol", "function": "humectant, solvent",
+         "iupac_name": "propane-1,2-diol"},
         {"inci_name": "CITRIC ACID", "cas_no": "77-92-9", "smiles": "C(C(=O)O)C(CC(=O)O)(C(=O)O)O",
-         "functional_category": "regulateur_pH", "matter_type": "acide", "function": "buffering, chelating"},
+         "functional_category": "regulateur_pH", "matter_type": "acide", "function": "buffering, chelating",
+         "iupac_name": "2-hydroxypropane-1,2,3-tricarboxylic acid"},
     ])
 
 
@@ -95,10 +101,13 @@ def filter_ingredients(df: pd.DataFrame, query: str = "",
                        matters: list[str] | None = None,
                        functions: list[str] | None = None,
                        function_col: str = "function") -> pd.DataFrame:
-    """Filtre le DataFrame par texte (nom INCI), catégorie/type, et fonction COSING."""
+    """Filtre le DataFrame par texte (nom INCI et/ou nom scientifique IUPAC), catégorie/type, et fonction COSING."""
     out = df
     if query:
-        out = out[out["inci_name"].astype(str).str.contains(query, case=False, na=False)]
+        name_match = out["inci_name"].astype(str).str.contains(query, case=False, na=False)
+        if "iupac_name" in out.columns:
+            name_match |= out["iupac_name"].astype(str).str.contains(query, case=False, na=False)
+        out = out[name_match]
     if categories and "functional_category" in out.columns:
         out = out[out["functional_category"].isin(categories)]
     if matters and "matter_type" in out.columns:
@@ -124,7 +133,7 @@ def main() -> None:
 
     with tab_search:
         col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-        query = col1.text_input("Nom INCI contient…", "")
+        query = col1.text_input("Nom ou nom scientifique contient…", "")
         cats = sorted(df["functional_category"].dropna().unique()) if "functional_category" in df.columns else []
         mats = sorted(df["matter_type"].dropna().unique()) if "matter_type" in df.columns else []
         funcs = list_functions(df)

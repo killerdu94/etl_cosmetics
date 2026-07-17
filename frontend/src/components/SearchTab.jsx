@@ -42,7 +42,7 @@ export default function SearchTab() {
         <input
           className="text-input"
           type="text"
-          placeholder="Nom INCI contient…"
+          placeholder="Nom ou nom scientifique contient…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -83,6 +83,7 @@ export default function SearchTab() {
           <thead>
             <tr>
               <th>Nom INCI</th>
+              <th>Nom scientifique</th>
               <th>CAS</th>
               <th>Catégorie</th>
               <th>Type de matière</th>
@@ -94,6 +95,7 @@ export default function SearchTab() {
             {items.map((it) => (
               <tr key={it.inci_name}>
                 <td>{it.inci_name}</td>
+                <td className="scientific-name-cell">{it.iupac_name ?? "—"}</td>
                 <td>{it.cas_no ?? "—"}</td>
                 <td>
                   {it.functional_category && (
